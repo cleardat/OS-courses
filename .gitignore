@@ -1,0 +1,49 @@
+# 编译输出
+*.o
+*.obj
+*.lo
+*.la
+*.al
+*.out
+*.d
+*.asm
+*.sym
+
+# 依赖中间文件
+*.dSYM/
+*.dylib
+*.dll
+*.so
+*.a
+*.lib
+
+# 可执行文件
+*.exe
+*.out
+*.app
+
+# 构建目录
+/build/
+**/obj/
+**/bin/
+**/lib/
+**/dist/
+/Debug/
+/Release/
+
+# IDE 生成的文件
+.vscode/
+.idea/
+*.sln
+*.vcxproj*
+*.xcodeproj/
+
+# 日志与临时文件
+*.log
+*.tmp
+*.swp
+*.bak
+
+# 其他
+*.cache
+*.config
