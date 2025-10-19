@@ -1,5 +1,6 @@
 #include <default_pmm.h>
 #include <best_fit_pmm.h>
+#include <buddy_pmm.h>
 #include <defs.h>
 #include <error.h>
 #include <memlayout.h>
@@ -10,7 +11,7 @@
 #include <string.h>
 #include <riscv.h>
 #include <dtb.h>
-
+#include <slub.h>
 // virtual address of physical page array
 struct Page *pages;
 // amount of physical memory (in pages)
@@ -34,7 +35,10 @@ static void check_alloc_page(void);
 
 // init_pmm_manager - initialize a pmm_manager instance
 static void init_pmm_manager(void) {
-    pmm_manager = &default_pmm_manager;
+    //pmm_manager = &default_pmm_manager;
+    //pmm_manager = &first_fit_pmm_manager;
+    //pmm_manager = &best_fit_pmm_manager;
+    pmm_manager = &buddy_pmm_manager;
     cprintf("memory management: %s\n", pmm_manager->name);
     pmm_manager->init();
 }
@@ -115,7 +119,9 @@ void pmm_init(void) {
 
     // use pmm->check to verify the correctness of the alloc/free function in a pmm
     check_alloc_page();
-
+   //如果要测试defalut和bestfit以及boddy system就把下面的两个函数注释掉
+    slub_init();
+    slub_selftest();
     extern char boot_page_table_sv39[];
     satp_virtual = (pte_t*)boot_page_table_sv39;
     satp_physical = PADDR(satp_virtual);
