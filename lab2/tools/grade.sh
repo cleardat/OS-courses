@@ -1,15 +1,15 @@
-#!/bin/sh
+#!/bin/bash
 
 verbose=false
 if [ "x$1" = "x-v" ]; then
     verbose=true
-    out=/dev/stdout
-    err=/dev/stderr
+    out=./.qemu.out
+    err=/dev/null
 else
     # out=/dev/null
     # err=/dev/null
-    out=/dev/stdout
-    err=/dev/stderr
+    out=./.qemu.out
+    err=/dev/null
 fi
 
 ## make & makeopts
