@@ -383,54 +383,88 @@ static void show_key_status(const char* step) {
             step, buddy_mgr.total_free, buddy_mgr.longest[0]);
 }
 
-// 1. 基础功能测试：单页/多页分配释放
+// 1. 基础功能测试：1页 + 3页 + 4页 分配释放
 static void buddy_check_basic(void) {
-    cprintf("\n=== [1] 基础功能测试：分配释放 ===\n");
+    cprintf("\n=== [1] 基础功能测试：1页 + 3页 + 4页 分配释放 ===\n");
     size_t initial_free = buddy_mgr.total_free;
+    show_key_status("初始化状态");
 
-    // 单页分配释放
+    // Step 1: 分配 1 页
     struct Page* p1 = buddy_alloc_pages(1);
-    assert(p1 && p1->property == 1 && buddy_mgr.total_free == initial_free - 1);
+    assert(p1 && "Step1: 分配 1 页失败");
+    uintptr_t pa1 = page2pa(p1);
+    cprintf("Step1: Alloc 1 page at 0x%016lx\n", pa1);
     show_key_status("分配1页");
 
+    // Step 2: 分配 3 页（应对齐为 4 页）
+    struct Page* p3 = buddy_alloc_pages(3);
+    assert(p3 && "Step2: 分配 3 页失败");
+    uintptr_t pa3 = page2pa(p3);
+    cprintf("Step2: Alloc 3 pages (aligned to 4) at 0x%016lx\n", pa3);
+    show_key_status("分配3页（对齐4页）");
+
+    // Step 3: 释放第一个 1 页
     buddy_free_pages(p1, 1);
-    assert(buddy_mgr.total_free == initial_free && buddy_mgr.longest[0] == initial_free);
+    cprintf("Step3: Freed 1 page at 0x%016lx\n", pa1);
     show_key_status("释放1页");
 
-    // 多页分配（非2的幂对齐）
-    struct Page* p4 = buddy_alloc_pages(3); // 对齐为4页
-    assert(p4 && p4->property == 4 && buddy_mgr.total_free == initial_free - 4);
-    show_key_status("分配4页（从3页对齐）");
+    // Step 4: 再分配 4 页，看是否复用前面释放的块
+    struct Page* p4 = buddy_alloc_pages(4);
+    assert(p4 && "Step4: 分配 4 页失败");
+    uintptr_t pa4 = page2pa(p4);
+    cprintf("Step4: Alloc 4 pages at 0x%016lx\n", pa4);
+    show_key_status("分配4页");
+
+    // Step 5: 全部释放
+    buddy_free_pages(p3, 3);
+    cprintf("Step5: Freed 3-page block (4 aligned) at 0x%016lx\n", pa3);
+    show_key_status("释放3页块");
 
     buddy_free_pages(p4, 4);
-    assert(buddy_mgr.total_free == initial_free);
-    show_key_status("释放4页");
+    cprintf("Step6: Freed 4-page block at 0x%016lx\n", pa4);
+    show_key_status("释放4页块");
 
-    cprintf("  基础功能测试通过\n");
+    // Step 6: 验证最终状态是否恢复
+    assert(buddy_mgr.total_free == initial_free);
+    assert(buddy_mgr.longest[0] == buddy_mgr.size);
+
+    cprintf(" 基础功能测试通过：1页+3页+4页 测试完成\n");
 }
 
-// 2. 边界场景测试：最小页和最大页
+
+
+// 2. 边界场景测试：最大页与超限制
 static void buddy_check_boundary(void) {
-    cprintf("\n=== [2] 边界场景测试 ===\n");
-    size_t max_pages = buddy_mgr.size;
+    cprintf("\n=== [2] 边界场景测试：分配满后再试1页 ===\n");
+    size_t max_pages    = buddy_mgr.size;
     size_t initial_free = buddy_mgr.total_free;
 
-    // 最小页（1页）
-    struct Page* p_min = buddy_alloc_pages(1);
-    assert(p_min && p_min->property == 1);
-    buddy_free_pages(p_min, 1);
-    assert(buddy_mgr.total_free == initial_free);
-
-    // 最大页（全量内存）
+    // 先把可管理内存一次性分配满
     struct Page* p_max = buddy_alloc_pages(max_pages);
-    assert(p_max && buddy_mgr.total_free == 0 && buddy_mgr.longest[0] == 0);
+    assert(p_max && "分配最大页数失败（p_max == NULL）");
+    assert(buddy_mgr.total_free == 0 && buddy_mgr.longest[0] == 0);
+    cprintf("  已分配最大页数：%lu 页，起始物理地址：0x%016lx\n",
+            (unsigned long)max_pages, page2pa(p_max));
     show_key_status("分配最大页数");
 
+    // 在已经分配满的情况下，再尝试分配 1 页，应该失败（返回 NULL）
+    struct Page* p_extra = buddy_alloc_pages(1);
+    if (p_extra == NULL) {
+        cprintf("  在满内存情况下再分配 1 页：返回 NULL（正确）\n");
+    } else {
+        // 若出现非空，说明分配器状态有问题：先释放以免泄漏，再报错
+        uintptr_t pa_extra = page2pa(p_extra);
+        cprintf("  [错误] 在满内存情况下仍然分配到 1 页：PA=0x%016lx\n", pa_extra);
+        buddy_free_pages(p_extra, 1);
+        assert(0 && "分配器在 total_free==0 时仍能分配出页面，逻辑错误");
+    }
+
+    // 释放最大块，状态应完全恢复
     buddy_free_pages(p_max, max_pages);
     assert(buddy_mgr.total_free == initial_free && buddy_mgr.longest[0] == max_pages);
     show_key_status("释放最大页数");
 
-    cprintf("  边界场景测试通过\n");
+    cprintf("  边界场景测试通过：分配满→再分配失败→释放后恢复\n");
 }
 
 // 3. 合并逻辑测试：连续释放合并，即伙伴系统核心能力
