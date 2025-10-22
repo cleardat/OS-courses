@@ -360,7 +360,7 @@ echo "<<<<<<<<<<<<<<< here_run_check <<<<<<<<<<<<<<<<<<"
 
 pts=5
 quick_check 'check physical_memory_map_information'                                         \
-    'memory management: best_fit_pmm_manager'                     \
+    'memory management: default_pmm_manager' \   # 这里需要修改成算法名字             
     '  memory: 0x0000000008000000, [0x0000000080000000, 0x0000000087ffffff].'                                  \
 
 pts=20
@@ -377,3 +377,10 @@ quick_check 'check_best_fit'                                       \
 ## print final-score
 show_final
 
+# 打分逻辑就是对比qemu.out的字符串跟上面的字符串是否一样。
+# 5分物理内存，比较内存管理算法是否采用的是规定的；
+# 系统物理内存的可用范围是否一致（[0x0000000080000000, 0x0000000087ffffff]）
+
+# 20分
+# succeed表示物理页分配器（PMM）的页分配和释放逻辑正确运行了
+# satp virtual address: 0xffffffffc0204000
