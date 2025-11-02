@@ -20,14 +20,12 @@ void test_illegal_instruction(void) {
     // 汇编器会接受这条指令（仅视为32位数据），但CPU运行时会识别为非法指令
     __asm__ __volatile__(".word 0x0000000b");
 }
-// 全局标记
-static int breakpoint_triggered = 0;
-
 void test_breakpoint(void) {
-    if (breakpoint_triggered) return;  // 已触发过，不再执行
     cprintf("=== 触发断点异常 ===\n");
-    __asm__ __volatile__("ebreak");
-    breakpoint_triggered = 1;  
+    __asm__ __volatile__(
+        "ebreak\n"    // 断点指令
+        "nop"         // 空操作，确保 epc+4 指向有效指令
+    );
 }
 // ============================
 
