@@ -24,7 +24,7 @@ void test_breakpoint(void) {
     cprintf("=== 触发断点异常 ===\n");
     __asm__ __volatile__(
         "ebreak\n"    // 断点指令
-        "nop"         // 空操作，确保 epc+4 指向有效指令
+        //"nop"         // 空操作，确保 epc+4 指向有效指令
     );
 }
 // ============================

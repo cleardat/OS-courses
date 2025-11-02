@@ -30,7 +30,8 @@ HOSTCFLAGS	:= -Wall -O2
 GDB		:= $(GCCPREFIX)gdb
 
 CC		:= $(GCCPREFIX)gcc
-CFLAGS  := -mcmodel=medany -std=gnu99 -Wno-unused -Werror 
+# 这里要禁用C扩展压缩指令，否则就会缩短成2字节指令，导致异常处理PC+4地址对齐错误
+CFLAGS  := -mcmodel=medany -std=gnu99 -Wno-unused -Werror -march=rv64ima -mabi=lp64
 CFLAGS	+= -fno-builtin -Wall -O2 -nostdinc $(DEFS)
 CFLAGS	+= -fno-stack-protector -ffunction-sections -fdata-sections
 CFLAGS	+= -g
