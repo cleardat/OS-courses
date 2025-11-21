@@ -101,17 +101,28 @@ void interrupt_handler(struct trapframe *tf)
         cprintf("Machine software interrupt\n");
         break;
     case IRQ_U_TIMER:
-        cprintf("User software interrupt\n");
+        cprintf("User Timer interrupt\n");
         break;
-    case IRQ_S_TIMER:
+    case IRQ_S_TIMER: {
+        static size_t print_count = 0;
         // "All bits besides SSIP and USIP in the sip register are
         // read-only." -- privileged spec1.9.1, 4.1.4, p59
         // In fact, Call sbi_set_timer will clear STIP, or you can clear it
         // directly.
-        // clear_csr(sip, SIP_STIP);
-
+        // cprintf("Supervisor timer interrupt\n");
         /*LAB3 请补充你在lab3中的代码 */ 
+        /* LAB3 时钟中断处理：设置下次事件、更新 ticks、周期性打印并关机 */
+        clock_set_next_event();
+        ticks++;
+        if (ticks % TICK_NUM == 0) {
+            print_ticks();
+            print_count++;
+            if (print_count == 10) {
+                sbi_shutdown();
+            }
+        }
         break;
+    }
     case IRQ_H_TIMER:
         cprintf("Hypervisor software interrupt\n");
         break;

@@ -104,7 +104,20 @@ alloc_proc(void)
          *       uint32_t flags;                             // Process flag
          *       char name[PROC_NAME_LEN + 1];               // Process name
          */
-        
+        proc->state = PROC_UNINIT;                         // 初始状态：未初始化
+        proc->pid = -1;                                    // 还未分配合法 PID
+        proc->runs = 0;                                    // 尚未被调度运行
+        proc->kstack = 0;                                  // 内核栈还未分配
+        proc->need_resched = 0;                            // 初始不需要立即调度
+        proc->parent = NULL;                               // 暂无父进程，fork 时再设置
+        proc->mm = NULL;                                   // 暂无内存管理结构（内核线程为 NULL）
+        memset(&(proc->context), 0, sizeof(struct context)); // 清空内核上下文，调度前再填
+        proc->tf = NULL;                                   // 暂无 trapframe，创建/切换时再设置
+        proc->pgdir = 0;                                   // 暂未指定页表基址
+        proc->flags = 0;                                   // 清空进程标志
+        memset(proc->name, 0, sizeof(proc->name));         // 进程名清零，后续通过 set_proc_name 设置
+        list_init(&(proc->list_link));
+        list_init(&(proc->hash_link));
     }
     return proc;
 }
