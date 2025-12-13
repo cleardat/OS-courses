@@ -15,6 +15,7 @@
 #include <sched.h>
 #include <sync.h>
 #include <sbi.h>
+#include <proc.h>
 
 #define TICK_NUM 100
 
@@ -49,7 +50,6 @@ bool trap_in_kernel(struct trapframe *tf)
 void print_trapframe(struct trapframe *tf)
 {
     cprintf("trapframe at %p\n", tf);
-    // cprintf("trapframe at 0x%x\n", tf);
     print_regs(&tf->gpr);
     cprintf("  status   0x%08x\n", tf->status);
     cprintf("  epc      0x%08x\n", tf->epc);
@@ -116,12 +116,22 @@ void interrupt_handler(struct trapframe *tf)
         cprintf("User software interrupt\n");
         break;
     case IRQ_S_TIMER:
-        /* LAB5 GRADE   YOUR CODE :  */
-        /* 时间片轮转： 
-        *(1) 设置下一次时钟中断（clock_set_next_event）
-        *(2) ticks 计数器自增
-        *(3) 每 TICK_NUM 次中断（如 100 次），进行判断当前是否有进程正在运行，如果有则标记该进程需要被重新调度（current->need_resched）
-        */
+        // "All bits besides SSIP and USIP in the sip register are
+        // read-only." -- privileged spec1.9.1, 4.1.4, p59
+        // In fact, Call sbi_set_timer will clear STIP, or you can clear it
+        // directly.
+        // clear_csr(sip, SIP_STIP);
+
+        /* LAB3 :填写你在lab3中实现的代码 */
+        /*(1)设置下次时钟中断- clock_set_next_event()
+         *(2)计数器（ticks）加一
+         *(3)当计数器加到100的时候，我们会输出一个`100ticks`表示我们触发了100次时钟中断，同时打印次数（num）加一
+         * (4)判断打印次数，当打印次数为10时，调用<sbi.h>中的关机函数关机
+         */
+
+        // lab6: YOUR CODE  (update LAB3 steps)
+        //  在时钟中断时调用调度器的 sched_class_proc_tick 函数
+
         break;
     case IRQ_H_TIMER:
         cprintf("Hypervisor software interrupt\n");
@@ -163,12 +173,6 @@ void exception_handler(struct trapframe *tf)
         break;
     case CAUSE_BREAKPOINT:
         cprintf("Breakpoint\n");
-        if (tf->gpr.a7 == 10)
-        {
-            tf->epc += 4;
-            syscall();
-            kernel_execve_ret(tf, current->kstack + KSTACKSIZE);
-        }
         break;
     case CAUSE_MISALIGNED_LOAD:
         cprintf("Load address misaligned\n");
