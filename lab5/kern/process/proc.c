@@ -105,6 +105,20 @@ alloc_proc(void)
          *       uint32_t flags;                             // Process flag
          *       char name[PROC_NAME_LEN + 1];               // Process name
          */
+        proc->state = PROC_UNINIT;                         // 初始状态：未初始化
+        proc->pid = -1;                                    // 还未分配合法 PID
+        proc->runs = 0;                                    // 尚未被调度运行
+        proc->kstack = 0;                                  // 内核栈还未分配
+        proc->need_resched = 0;                            // 初始不需要立即调度
+        proc->parent = NULL;                               // 暂无父进程，fork 时再设置
+        proc->mm = NULL;                                   // 暂无内存管理结构（内核线程为 NULL）
+        memset(&(proc->context), 0, sizeof(struct context)); // 清空内核上下文，调度前再填
+        proc->tf = NULL;                                   // 暂无 trapframe，创建/切换时再设置
+        proc->pgdir = boot_pgdir_pa;                       // 初始页表为内核页表
+        proc->flags = 0;                                   // 清空进程标志
+        memset(proc->name, 0, sizeof(proc->name));         // 进程名清零，后续通过 set_proc_name 设置
+        list_init(&(proc->list_link));
+        list_init(&(proc->hash_link));
 
         // LAB5 YOUR CODE : (update LAB4 steps)
         /*
@@ -225,6 +239,28 @@ void proc_run(struct proc_struct *proc)
          *   lsatp():                   Modify the value of satp register
          *   switch_to():              Context switching between two processes
          */
+
+        /*
+         * Steps:
+         * 1. 关中断
+         * 2. 切换 current 指针
+         * 3. 切换页表（SATP）
+         * 4. 上下文切换 switch_to(from, to)
+         * 5. 开中断
+         */
+        bool intr_flag;
+        local_intr_save(intr_flag);
+        {
+            struct proc_struct *prev = current;
+            current = proc;                       // 更新当前进程
+            if (prev->pgdir != proc->pgdir) {     // 若页表不同则切换
+                lsatp((unsigned int)proc->pgdir);
+                barrier();                        // 防止乱序
+            }
+            cprintf("proc_run: switch %d -> %d\n", prev->pid, proc->pid);
+            switch_to(&(prev->context), &(proc->context));
+        }
+        local_intr_restore(intr_flag);
     }
 }
 
@@ -433,6 +469,29 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
     //    5. insert proc_struct into hash_list && proc_list
     //    6. call wakeup_proc to make the new child process RUNNABLE
     //    7. set ret vaule using child proc's pid
+    if ((proc = alloc_proc()) == NULL) {
+        goto fork_out;                      // 分配 PCB 失败
+    }
+
+    if (setup_kstack(proc) != 0) {          // 分配内核栈失败
+        goto bad_fork_cleanup_proc;
+    }
+
+    if (copy_mm(clone_flags, proc) != 0) {  // 复制/共享内存失败
+        goto bad_fork_cleanup_kstack;
+    }
+
+    proc->parent = current;                 // 设置父进程
+    proc->pid = get_pid();                  // 分配唯一 PID
+    proc->pgdir = current->pgdir;           // 共享当前页表（内核线程场景）
+    copy_thread(proc, stack, tf);           // 设置 trapframe 与初始上下文
+
+    hash_proc(proc);                        // 加入哈希表
+    list_add(&proc_list, &(proc->list_link)); // 加入进程链表
+    nr_process++;                           // 进程计数 +1
+
+    wakeup_proc(proc);                      // 置为 RUNNABLE
+    ret = proc->pid;                        // 返回子进程 PID
 
     // LAB5 YOUR CODE : (update LAB4 steps)
     // TIPS: you should modify your written code in lab4(step1 and step5), not add more code.
