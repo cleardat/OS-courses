@@ -33,7 +33,7 @@
      void check_vma_struct(void);
      void check_pgfault(void);
 */
-
+volatile unsigned int pgfault_num = 0;//==COW==
 static void check_vmm(void);
 static void check_vma_struct(void);
 
@@ -243,7 +243,123 @@ void exit_mmap(struct mm_struct *mm)
         exit_range(pgdir, vma->vm_start, vma->vm_end);
     }
 }
+//==COW==
+int do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr)
+{
+    int ret = -E_INVAL;
+    pgfault_num++;
 
+    if (mm == NULL)
+    {
+        goto failed;
+    }
+
+    // 只处理用户空间缺页
+    if (!USER_ACCESS(addr, addr + 1))
+    {
+        goto failed;
+    }
+
+    uintptr_t la = ROUNDDOWN(addr, PGSIZE);
+
+    // 查找对应的 vma
+    struct vma_struct *vma = find_vma(mm, la);
+    if (vma == NULL || la < vma->vm_start)
+    {
+        goto failed;
+    }
+
+    // error_code: 0 = 读缺页, 1 = 写缺页，在 trap.c 里这样约定
+    bool write = (error_code & 0x1) != 0;
+
+    // 权限检查
+    if (write && !(vma->vm_flags & VM_WRITE))
+    {
+        goto failed;
+    }
+    if (!write && !(vma->vm_flags & (VM_READ | VM_WRITE)))
+    {
+        goto failed;
+    }
+
+    // 找到/创建页表项
+    pte_t *ptep = get_pte(mm->pgdir, la, 1);
+    if (ptep == NULL)
+    {
+        ret = -E_NO_MEM;
+        goto failed;
+    }
+
+    // 情况 1：尚未映射——普通缺页，分配新页
+    if (!(*ptep & PTE_V))
+    {
+        uint32_t perm = PTE_U | PTE_R;
+        if (vma->vm_flags & VM_WRITE)
+        {
+            perm |= PTE_W;
+        }
+        if (vma->vm_flags & VM_EXEC)
+        {
+            perm |= PTE_X;
+        }
+
+        struct Page *page = pgdir_alloc_page(mm->pgdir, la, perm);
+        if (page == NULL)
+        {
+            ret = -E_NO_MEM;
+            goto failed;
+        }
+        return 0;
+    }
+
+    // 情况 2：已有映射，但这是一次对 COW 页的写访问
+    if (write && (*ptep & PTE_COW))
+    {
+        struct Page *oldpage = pte2page(*ptep);
+        uint32_t perm = *ptep & (PTE_R | PTE_W | PTE_X | PTE_U);
+
+        if (page_ref(oldpage) > 1)
+        {
+            // 多个进程共享：真正拷贝一份新页
+            struct Page *newpage = alloc_page();
+            if (newpage == NULL)
+            {
+                ret = -E_NO_MEM;
+                goto failed;
+            }
+            memcpy(page2kva(newpage), page2kva(oldpage), PGSIZE);
+            perm |= PTE_W; // 新页要可写
+            int r = page_insert(mm->pgdir, newpage, la, perm);
+            if (r != 0)
+            {
+                ret = r;
+                goto failed;
+            }
+        }
+        else
+        {
+            // 只有当前进程在用：去掉 COW，直接改成可写
+            perm |= PTE_W;
+            int r = page_insert(mm->pgdir, oldpage, la, perm);
+            if (r != 0)
+            {
+                ret = r;
+                goto failed;
+            }
+        }
+        return 0;
+    }
+
+    // 其他情况暂时视为无效缺页
+    ret = -E_INVAL;
+
+failed:
+    cprintf("do_pgfault failed: addr = %p, error = %d, ret = %d\n",
+            (void *)addr, error_code, ret);
+    return ret;
+}
+
+//==COW end==
 bool copy_from_user(struct mm_struct *mm, void *dst, const void *src, size_t len, bool writable)
 {
     if (!user_mem_check(mm, (uintptr_t)src, len, writable))

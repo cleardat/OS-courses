@@ -390,50 +390,32 @@ int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end,
         }
         // call get_pte to find process B's pte according to the addr start. If
         // pte is NULL, just alloc a PT
+        //==COW==
         if (*ptep & PTE_V)
         {
             if ((nptep = get_pte(to, start, 1)) == NULL)
             {
                 return -E_NO_MEM;
             }
-            uint32_t perm = (*ptep & PTE_USER);
-            // get page from ptep
-            struct Page *page = pte2page(*ptep);
-            // alloc a page for process B
-            struct Page *npage = alloc_page();
-            assert(page != NULL);
-            assert(npage != NULL);
-            int ret = 0;
-            /* LAB5:EXERCISE2 YOUR CODE
-             * replicate content of page to npage, build the map of phy addr of
-             * nage with the linear addr start
-             *
-             * Some Useful MACROs and DEFINEs, you can use them in below
-             * implementation.
-             * MACROs or Functions:
-             *    page2kva(struct Page *page): return the kernel vritual addr of
-             * memory which page managed (SEE pmm.h)
-             *    page_insert: build the map of phy addr of an Page with the
-             * linear addr la
-             *    memcpy: typical memory copy function
-             *
-             * (1) find src_kvaddr: the kernel virtual address of page
-             * (2) find dst_kvaddr: the kernel virtual address of npage
-             * (3) memory copy from src_kvaddr to dst_kvaddr, size is PGSIZE
-             * (4) build the map of phy addr of  nage with the linear addr start
-             */
 
-            // (1) 源页的内核虚拟地址
-            void *src_kvaddr = page2kva(page);
-            // (2) 目标页的内核虚拟地址
-            void *dst_kvaddr = page2kva(npage);
-            // (3) 拷贝一个页的内容
-            memcpy(dst_kvaddr, src_kvaddr, PGSIZE);
-            // (4) 把 npage 映射到子进程页表的线性地址 start
-            ret = page_insert(to, npage, start, perm);
-            
-            assert(ret == 0);
+            // 如果原来是可写页，则把父进程这页改成只读 + COW
+            if (*ptep & PTE_W)
+            {
+                *ptep = (*ptep & ~PTE_W) | PTE_COW;
+            }
+
+            // 现在统一从父进程的 PTE 里取权限（可能已经带 COW）
+            uint32_t perm = *ptep & (PTE_USER | PTE_COW);
+            struct Page *page = pte2page(*ptep);
+
+            // 子进程也共享同一个物理页，权限与父一致（包括 COW 标志）
+            int ret = page_insert(to, page, start, perm);
+            if (ret != 0)
+            {
+                return ret;
+            }
         }
+        //==COW end==
         start += PGSIZE;
     } while (start != 0 && start < end);
     return 0;
