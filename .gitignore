@@ -9,6 +9,7 @@
 *.asm
 *.sym
 
+*.in
 # 依赖中间文件
 *.dSYM/
 *.dylib

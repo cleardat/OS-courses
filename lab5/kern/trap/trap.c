@@ -122,6 +122,18 @@ void interrupt_handler(struct trapframe *tf)
         *(2) ticks 计数器自增
         *(3) 每 TICK_NUM 次中断（如 100 次），进行判断当前是否有进程正在运行，如果有则标记该进程需要被重新调度（current->need_resched）
         */
+        // (1) 设置下一次时钟中断
+        clock_set_next_event();
+        
+        // (2) ticks 计数器自增
+        if (++ticks % TICK_NUM == 0) {
+            // (3) 每 TICK_NUM(100) 次中断时
+            print_ticks();
+            // 判断当前是否有进程正在运行，如果有则标记需要重新调度
+            if (current != NULL) {
+                current->need_resched = 1;
+            }
+        }
         break;
     case IRQ_H_TIMER:
         cprintf("Hypervisor software interrupt\n");
@@ -234,6 +246,10 @@ static inline void trap_dispatch(struct trapframe *tf)
  * */
 void trap(struct trapframe *tf)
 {
+    // 在 trap 入口处统一设置SUM位（控制 S 模式是否允许访问 U 模式内存）
+    // 确保内核可以访问用户内存
+    set_csr(sstatus, SSTATUS_SUM);
+    
     // dispatch based on what type of trap occurred
     //    cputs("some trap");
     if (current == NULL)

@@ -126,6 +126,10 @@ alloc_proc(void)
          *       uint32_t wait_state;                        // waiting state
          *       struct proc_struct *cptr, *yptr, *optr;     // relations between processes
          */
+        proc->wait_state = 0;      // 初始没有等待
+        proc->cptr = NULL;          // 初始无子进程
+        proc->yptr = NULL;          // 无更年轻的兄弟
+        proc->optr = NULL;          // 无更年长的兄弟
     }
     return proc;
 }
@@ -253,11 +257,9 @@ void proc_run(struct proc_struct *proc)
         {
             struct proc_struct *prev = current;
             current = proc;                       // 更新当前进程
-            if (prev->pgdir != proc->pgdir) {     // 若页表不同则切换
-                lsatp((unsigned int)proc->pgdir);
-                barrier();                        // 防止乱序
-            }
-            cprintf("proc_run: switch %d -> %d\n", prev->pid, proc->pid);
+            // 切换页表（SATP）- 必须无条件切换，因为可能有进程exit改变了全局satp
+            lsatp(current->pgdir);
+            barrier();                        // 防止乱序
             switch_to(&(prev->context), &(proc->context));
         }
         local_intr_restore(intr_flag);
@@ -481,14 +483,22 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
         goto bad_fork_cleanup_kstack;
     }
 
+    // LAB5: step 1 更新：设置父进程并确保当前进程的 wait_state 为 0
     proc->parent = current;                 // 设置父进程
+    assert(current->wait_state == 0);       // 确保不在等待状态
     proc->pid = get_pid();                  // 分配唯一 PID
-    proc->pgdir = current->pgdir;           // 共享当前页表（内核线程场景）
+    // copy_mm 已经设置了 proc->pgdir，这里又覆盖回去了。所以下面要注释掉
+    // proc->pgdir = current->pgdir;           // 共享当前页表（内核线程场景）
     copy_thread(proc, stack, tf);           // 设置 trapframe 与初始上下文
 
-    hash_proc(proc);                        // 加入哈希表
-    list_add(&proc_list, &(proc->list_link)); // 加入进程链表
-    nr_process++;                           // 进程计数 +1
+    // LAB5: step 5 更新：用 set_links 同时插入链表并维护进程树关系
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    {
+        hash_proc(proc);                    // 加入哈希表
+        set_links(proc);                    // 加入进程链表并设置关系链
+    }
+    local_intr_restore(intr_flag);
 
     wakeup_proc(proc);                      // 置为 RUNNABLE
     ret = proc->pid;                        // 返回子进程 PID
@@ -736,6 +746,18 @@ load_icode(unsigned char *binary, size_t size)
      *          tf->status should be appropriate for user program (the value of sstatus)
      *          hint: check meaning of SPP, SPIE in SSTATUS, use them by SSTATUS_SPP, SSTATUS_SPIE(defined in risv.h)
      */
+    // 1. 用户栈指针：放在用户栈顶 USTACKTOP
+    tf->gpr.sp = USTACKTOP; //USTACKTOP是用户栈顶的虚拟地址
+
+    // 2. 入口 PC：ELF 文件头中的入口地址 e_entry，是编译器算好的。
+    tf->epc = elf->e_entry;
+
+    // 3. sstatus 设置为从 S 态 sret 返回到 U 态
+    //    - 清掉 SPP：表示 sret 返回到 U 模式
+    //    - 置位 SPIE：sret 后在 U 态开中断
+    tf->status &= ~SSTATUS_SPP;
+    tf->status |= SSTATUS_SPIE;
+    //tf->status &= ~SSTATUS_SIE; //感觉其实没用，因为sret时SIE ← SPIE，会被立刻覆盖
 
     ret = 0;
 out:

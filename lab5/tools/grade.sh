@@ -53,7 +53,8 @@ else
 fi
 
 ## default variables
-default_timeout=90
+## 改成10s
+default_timeout=10
 default_pts=5
 
 pts=5
