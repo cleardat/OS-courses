@@ -143,15 +143,18 @@ alloc_proc(void)
         proc->pgdir = boot_pgdir_pa;
         proc->flags = 0;
         memset(proc->name, 0, PROC_NAME_LEN);
+        list_init(&(proc->list_link));
+        list_init(&(proc->hash_link));
         // lab5 add:
         proc->wait_state = 0;
         proc->cptr = proc->optr = proc->yptr = NULL;
-        proc->rq = NULL;              // 初始化运行队列为空
-        list_init(&(proc->run_link)); // 初始化运行队列的指针
+        proc->rq = NULL;
+        list_init(&(proc->run_link));
         proc->time_slice = 0;
         proc->lab6_run_pool.left = proc->lab6_run_pool.right = proc->lab6_run_pool.parent = NULL;
         proc->lab6_stride = 0;
         proc->lab6_priority = 0;
+        proc->filesp = NULL;
 
         
     }
@@ -256,24 +259,24 @@ get_pid(void)
 // NOTE: before call switch_to, should load  base addr of "proc"'s new PDT
 void proc_run(struct proc_struct *proc)
 {
-    // LAB4:填写你在lab4中实现的代码
-        /*
-        * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
-        * MACROs or Functions:
-        *   local_intr_save():        Disable interrupts
-        *   local_intr_restore():     Enable Interrupts
-        *   lcr3():                   Modify the value of CR3 register
-        *   switch_to():              Context switching between two processes
-        */
-    //LAB8 YOUR CODE : (update LAB4 steps)
-      /*
-       * below fields(add in LAB6) in proc_struct need to be initialized
-       *       before switch_to();you should flush the tlb
-       *        MACROs or Functions:
-       *       flush_tlb():          flush the tlb        
-       */
-    
+    if (proc != current)
+    {
+        bool intr_flag;
+        local_intr_save(intr_flag);
+        {
+            struct proc_struct *prev = current;
+            current = proc;
+            if (prev->pgdir != proc->pgdir)
+            {
+                lsatp(proc->pgdir);
+                flush_tlb();
+            }
+            switch_to(&(prev->context), &(proc->context));
+        }
+        local_intr_restore(intr_flag);
+    }
 }
+
 
 // forkret -- the first kernel entry point of a new thread/process
 // NOTE: the addr of forkret is setted in copy_thread function
@@ -504,46 +507,41 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
         goto fork_out;
     }
     ret = -E_NO_MEM;
-    // LAB8:EXERCISE2 YOUR CODE  HINT:how to copy the fs in parent's proc_struct?
-    // LAB4:填写你在lab4中实现的代码
-    /*
-     * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
-     * MACROs or Functions:
-     *   alloc_proc:   create a proc struct and init fields (lab4:exercise1)
-     *   setup_kstack: alloc pages with size KSTACKPAGE as process kernel stack
-     *   copy_mm:      process "proc" duplicate OR share process "current"'s mm according clone_flags
-     *                 if clone_flags & CLONE_VM, then "share" ; else "duplicate"
-     *   copy_thread:  setup the trapframe on the  process's kernel stack top and
-     *                 setup the kernel entry point and stack of process
-     *   hash_proc:    add proc into proc hash_list
-     *   get_pid:      alloc a unique pid for process
-     *   wakeup_proc:  set proc->state = PROC_RUNNABLE
-     * VARIABLES:
-     *   proc_list:    the process set's list
-     *   nr_process:   the number of process set
-     */
 
-    //    1. call alloc_proc to allocate a proc_struct
-    //    2. call setup_kstack to allocate a kernel stack for child process
-    //    3. call copy_mm to dup OR share mm according clone_flag
-    //    4. call copy_thread to setup tf & context in proc_struct
-    //    5. insert proc_struct into hash_list && proc_list
-    //    6. call wakeup_proc to make the new child process RUNNABLE
-    //    7. set ret vaule using child proc's pid
-
-    // LAB5:填写你在lab5中实现的代码 (update LAB4 steps)
-    /* Some Functions
-     *    set_links:  set the relation links of process.  ALSO SEE: remove_links:  lean the relation links of process
-     *    -------------------
-     *    update step 1: set child proc's parent to current process, make sure current process's wait_state is 0
-     *    update step 5: insert proc_struct into hash_list && proc_list, set the relation links of process
-     */
-    
-    if (copy_files(clone_flags, proc) != 0)
-    { // for LAB8
+    if ((proc = alloc_proc()) == NULL)
+    {
+        goto fork_out;
+    }
+    if ((ret = setup_kstack(proc)) != 0)
+    {
+        goto bad_fork_cleanup_proc;
+    }
+    if ((ret = copy_mm(clone_flags, proc)) != 0)
+    {
         goto bad_fork_cleanup_kstack;
     }
-    
+    copy_thread(proc, stack, tf);
+
+    proc->parent = current;
+    assert(current->wait_state == 0);
+    proc->pid = get_pid();
+
+    if ((ret = copy_files(clone_flags, proc)) != 0)
+    {
+        goto bad_fork_cleanup_fs;
+    }
+
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    {
+        hash_proc(proc);
+        set_links(proc);
+    }
+    local_intr_restore(intr_flag);
+
+    wakeup_proc(proc);
+    ret = proc->pid;
+
 fork_out:
     return ret;
 
@@ -555,6 +553,7 @@ bad_fork_cleanup_proc:
     kfree(proc);
     goto fork_out;
 }
+
 
 // do_exit - called by sys_exit
 //   1. call exit_mmap & put_pgdir & mm_destroy to free the almost all memory space of process
@@ -666,7 +665,7 @@ load_icode(int fd, int argc, char **kargv)
      * (7) setup trapframe for user environment
      * (8) if up steps failed, you should cleanup the env.
      */
-    
+    return -E_NO_MEM;
 }
 
 // this function isn't very correct in LAB8
