@@ -196,14 +196,27 @@ void exception_handler(struct trapframe *tf)
         cprintf("Environment call from M-mode\n");
         break;
     case CAUSE_FETCH_PAGE_FAULT:
-        cprintf("Instruction page fault\n");
-        break;
     case CAUSE_LOAD_PAGE_FAULT:
-        cprintf("Load page fault\n");
-        break;
     case CAUSE_STORE_PAGE_FAULT:
-        cprintf("Store/AMO page fault\n");
+    {
+        bool write = (tf->cause == CAUSE_STORE_PAGE_FAULT);
+        struct mm_struct *mm = (current != NULL) ? current->mm : NULL;
+        if (mm == NULL)
+        {
+            cprintf("Page fault with no mm, addr = %p\n", (void *)tf->tval);
+            print_trapframe(tf);
+            panic("unhandled page fault");
+        }
+        uint32_t err = write ? 1 : 0;
+        ret = do_pgfault(mm, err, tf->tval);
+        if (ret != 0)
+        {
+            cprintf("do_pgfault failed, ret = %d, addr = %p\n", ret, (void *)tf->tval);
+            print_trapframe(tf);
+            do_exit(-E_KILLED);
+        }
         break;
+    }
     default:
         print_trapframe(tf);
         break;

@@ -244,6 +244,70 @@ void exit_mmap(struct mm_struct *mm)
     }
 }
 
+int do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr)
+{
+    int ret = -E_INVAL;
+
+    if (mm == NULL)
+    {
+        goto failed;
+    }
+    if (!USER_ACCESS(addr, addr + 1))
+    {
+        goto failed;
+    }
+
+    uintptr_t la = ROUNDDOWN(addr, PGSIZE);
+    struct vma_struct *vma = find_vma(mm, la);
+    if (vma == NULL || la < vma->vm_start)
+    {
+        goto failed;
+    }
+
+    bool write = (error_code & 0x1) != 0;
+    if (write && !(vma->vm_flags & VM_WRITE))
+    {
+        goto failed;
+    }
+    if (!write && !(vma->vm_flags & (VM_READ | VM_WRITE | VM_EXEC)))
+    {
+        goto failed;
+    }
+
+    pte_t *ptep = get_pte(mm->pgdir, la, 1);
+    if (ptep == NULL)
+    {
+        ret = -E_NO_MEM;
+        goto failed;
+    }
+
+    if (!(*ptep & PTE_V))
+    {
+        uint32_t perm = PTE_U | PTE_R;
+        if (vma->vm_flags & VM_WRITE)
+        {
+            perm |= PTE_W;
+        }
+        if (vma->vm_flags & VM_EXEC)
+        {
+            perm |= PTE_X;
+        }
+        if (pgdir_alloc_page(mm->pgdir, la, perm) == NULL)
+        {
+            ret = -E_NO_MEM;
+            goto failed;
+        }
+        return 0;
+    }
+
+    ret = -E_INVAL;
+
+failed:
+    cprintf("do_pgfault failed: addr = %p, error = %d, ret = %d\n",
+            (void *)addr, error_code, ret);
+    return ret;
+}
+
 bool copy_from_user(struct mm_struct *mm, void *dst, const void *src, size_t len, bool writable)
 {
     if (!user_mem_check(mm, (uintptr_t)src, len, writable))

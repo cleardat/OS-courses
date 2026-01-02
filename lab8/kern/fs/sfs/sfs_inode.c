@@ -600,7 +600,51 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
 	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_buf_op	
 	*/
 
-    
+    blkoff = offset % SFS_BLKSIZE;
+    char *bufp = buf;
+
+    if (blkoff != 0) {
+        size = (nblks != 0) ? (SFS_BLKSIZE - blkoff) : (endpos - offset);
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+            goto out;
+        }
+        if ((ret = sfs_buf_op(sfs, bufp, size, ino, blkoff)) != 0) {
+            goto out;
+        }
+        alen += size;
+        bufp += size;
+        offset += size;
+        blkno ++;
+        if (nblks > 0) {
+            nblks --;
+        }
+    }
+
+    while (nblks != 0) {
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+            goto out;
+        }
+        if ((ret = sfs_block_op(sfs, bufp, ino, 1)) != 0) {
+            goto out;
+        }
+        alen += SFS_BLKSIZE;
+        bufp += SFS_BLKSIZE;
+        blkno ++;
+        nblks --;
+    }
+
+    if (offset < endpos) {
+        size = endpos % SFS_BLKSIZE;
+        if (size != 0) {
+            if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+                goto out;
+            }
+            if ((ret = sfs_buf_op(sfs, bufp, size, ino, 0)) != 0) {
+                goto out;
+            }
+            alen += size;
+        }
+    }
 
 out:
     *alenp = alen;
@@ -987,4 +1031,3 @@ static const struct inode_ops sfs_node_fileops = {
     .vop_tryseek                    = sfs_tryseek,
     .vop_truncate                   = sfs_truncfile,
 };
-
