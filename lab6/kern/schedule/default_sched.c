@@ -17,7 +17,11 @@
 static void
 RR_init(struct run_queue *rq)
 {
-    // LAB6: YOUR CODE
+    // LAB6: 2311366
+    // 初始化运行队列的链表为空
+    list_init(&(rq->run_list));
+    // 初始时队列中进程数为0
+    rq->proc_num = 0;
 }
 
 /*
@@ -34,7 +38,19 @@ RR_init(struct run_queue *rq)
 static void
 RR_enqueue(struct run_queue *rq, struct proc_struct *proc)
 {
-    // LAB6: YOUR CODE
+    // LAB6: 2311366
+    // 断言：进程的运行队列链表节点应该为空（即进程不在任何队列中）
+    assert(list_empty(&(proc->run_link)));
+    // 将进程的run_link节点加入到运行队列的尾部（实现FIFO）
+    list_add_before(&(rq->run_list), &(proc->run_link));
+    // 如果进程时间片为0或已用完，重新分配最大时间片
+    if (proc->time_slice == 0 || proc->time_slice > rq->max_time_slice) {
+        proc->time_slice = rq->max_time_slice;
+    }
+    // 设置进程所属的运行队列
+    proc->rq = rq;
+    // 运行队列中的进程数加1
+    rq->proc_num ++;
 }
 
 /*
@@ -47,7 +63,13 @@ RR_enqueue(struct run_queue *rq, struct proc_struct *proc)
 static void
 RR_dequeue(struct run_queue *rq, struct proc_struct *proc)
 {
-    // LAB6: YOUR CODE
+    // LAB6: 2311366
+    // 断言：进程的run_link应该在某个队列中（不为空）
+    assert(!list_empty(&(proc->run_link)) && proc->rq == rq);
+    // 将进程的run_link节点从运行队列中删除，并重新初始化该节点
+    list_del_init(&(proc->run_link));
+    // 运行队列中的进程数减1
+    rq->proc_num --;
 }
 
 /*
@@ -61,7 +83,16 @@ RR_dequeue(struct run_queue *rq, struct proc_struct *proc)
 static struct proc_struct *
 RR_pick_next(struct run_queue *rq)
 {
-    // LAB6: YOUR CODE
+    // LAB6: 2311366
+    // 获取运行队列链表的第一个节点（队首）
+    list_entry_t *le = list_next(&(rq->run_list));
+    // 如果链表不为空（有可运行的进程）
+    if (le != &(rq->run_list)) {
+        // 通过le2proc宏将链表节点转换为对应的进程控制块指针
+        return le2proc(le, run_link);
+    }
+    // 如果队列为空，返回NULL
+    return NULL;
 }
 
 /*
@@ -74,7 +105,17 @@ RR_pick_next(struct run_queue *rq)
 static void
 RR_proc_tick(struct run_queue *rq, struct proc_struct *proc)
 {
-    // LAB6: YOUR CODE
+    // LAB6: 2311366
+    // 检查进程的时间片是否大于0
+    if (proc->time_slice > 0) {
+        // 时间片减1
+        proc->time_slice --;
+    }
+    // 如果时间片用完了
+    if (proc->time_slice == 0) {
+        // 设置need_resched标志，表示需要进行进程调度
+        proc->need_resched = 1;
+    }
 }
 
 struct sched_class default_sched_class = {

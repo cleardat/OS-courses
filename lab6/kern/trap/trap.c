@@ -131,6 +131,21 @@ void interrupt_handler(struct trapframe *tf)
 
         // lab6: YOUR CODE  (update LAB3 steps)
         //  在时钟中断时调用调度器的 sched_class_proc_tick 函数
+        
+        // (1) 设置下一次时钟中断
+        clock_set_next_event();
+        
+        // (2) ticks 计数器自增
+        if (++ticks % TICK_NUM == 0) {
+            // (3) 每 TICK_NUM(100) 次中断时
+            print_ticks();
+            // lab6: 调用调度器的 proc_tick 函数
+            // 判断当前是否有进程正在运行
+            if (current != NULL) {
+                // 通知调度器时钟中断发生
+                sched_class_proc_tick(current);
+            }
+        }
 
         break;
     case IRQ_H_TIMER:

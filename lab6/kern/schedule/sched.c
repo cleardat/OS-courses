@@ -52,7 +52,9 @@ void sched_init(void)
 {
     list_init(&timer_list);
 
-    sched_class = &default_sched_class;
+    // LAB6: 使用 Stride 调度器或 RR 调度器
+    // sched_class = &default_sched_class;  // RR调度器
+    sched_class = &stride_sched_class;       // Stride调度器
 
     rq = &__rq;
     rq->max_time_slice = MAX_TIME_SLICE;
