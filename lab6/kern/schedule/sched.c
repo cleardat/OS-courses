@@ -52,6 +52,8 @@ void sched_init(void)
 {
     list_init(&timer_list);
 
+    // LAB6: 选择调度器 (切换到stride_sched_class可测试Stride算法)
+    // sched_class = &stride_sched_class;
     sched_class = &default_sched_class;
 
     rq = &__rq;
