@@ -55,6 +55,7 @@ void sched_init(void)
     // LAB6: 选择调度器 (切换到stride_sched_class可测试Stride算法)
     // sched_class = &stride_sched_class;
     sched_class = &default_sched_class;
+    // sched_class = &fifo_sched_class;  // FIFO先来先服务调度
 
     rq = &__rq;
     rq->max_time_slice = MAX_TIME_SLICE;

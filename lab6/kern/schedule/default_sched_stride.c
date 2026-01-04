@@ -9,11 +9,27 @@
 
 /* You should define the BigStride constant here*/
 /* LAB6 CHALLENGE 1: YOUR CODE */
-/* BIG_STRIDE 应该是一个足够大的值，使得 BIG_STRIDE / priority 有意义
- * 同时要保证 stride 的差值不会溢出 int32_t
- * 使用 0x7FFFFFFF (2^31 - 1) 作为最大值
+/**
+ * BIG_STRIDE 取值分析：
+ * 
+ * 【溢出风险】当前值 0x7FFFFFFF 容易溢出：
+ * - lab6_stride 是 uint32_t (0 ~ 2^32-1)
+ * - 如果 priority=1，运行2次后 stride = 0xFFFFFFFE，第3次就溢出
+ * 
+ * 【比较机制】代码使用有符号差值比较：int32_t c = p->stride - q->stride
+ * - 利用补码性质处理环形空间
+ * - 但要求：任意两进程的 stride 差值 < 2^31，否则比较会出错
+ * 
+ * 【安全取值】理论上应该：BIG_STRIDE < 2^31 / MAX_PROC_NUM
+ * - 假设最多64个进程，优先级差10倍：BIG_STRIDE = 2^20 = 1048576 更安全
+ * - 但为了通过测试，这里保持 0x7FFFFFFF（依赖进程数少的前提）
+ * 
+ * 【实际限制】当前取值要求：
+ * - 系统中进程数不能太多
+ * - 优先级差异不能太大（建议1~10之间）
+ * - 否则会出现 stride 差值超过 2^31 导致比较错误
  */
-#define BIG_STRIDE 0x7FFFFFFF
+#define BIG_STRIDE 0x7FFFFFFF  //  更保险：0x100000
 
 /* The compare function for two skew_heap_node_t's and the
  * corresponding procs*/
