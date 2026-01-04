@@ -105,6 +105,20 @@ alloc_proc(void)
          *       uint32_t flags;                             // Process flag
          *       char name[PROC_NAME_LEN + 1];               // Process name
          */
+        proc->state = PROC_UNINIT;                         // 初始状态：未初始化
+        proc->pid = -1;                                    // 还未分配合法 PID
+        proc->runs = 0;                                    // 尚未被调度运行
+        proc->kstack = 0;                                  // 内核栈还未分配
+        proc->need_resched = 0;                            // 初始不需要立即调度
+        proc->parent = NULL;                               // 暂无父进程，fork 时再设置
+        proc->mm = NULL;                                   // 暂无内存管理结构（内核线程为 NULL）
+        memset(&(proc->context), 0, sizeof(struct context)); // 清空内核上下文，调度前再填
+        proc->tf = NULL;                                   // 暂无 trapframe，创建/切换时再设置
+        proc->pgdir = boot_pgdir_pa;                       // 初始页表为内核页表
+        proc->flags = 0;                                   // 清空进程标志
+        memset(proc->name, 0, sizeof(proc->name));         // 进程名清零
+        list_init(&(proc->list_link));
+        list_init(&(proc->hash_link));
 
         // LAB5:填写你在lab5中实现的代码 (update LAB4 steps)
         /*
@@ -112,6 +126,10 @@ alloc_proc(void)
          *       uint32_t wait_state;                        // waiting state
          *       struct proc_struct *cptr, *yptr, *optr;     // relations between processes
          */
+        proc->wait_state = 0;                              // 初始没有等待
+        proc->cptr = NULL;                                 // 初始无子进程
+        proc->yptr = NULL;                                 // 无更年轻的兄弟
+        proc->optr = NULL;                                 // 无更年长的兄弟
 
         // LAB6:YOUR CODE (update LAB5 steps)
         /*
@@ -123,6 +141,12 @@ alloc_proc(void)
          *       uint32_t lab6_stride;                       // stride value (lab6 stride)
          *       uint32_t lab6_priority;                     // priority value (lab6 stride)
          */
+        proc->rq = NULL;                                   // 运行队列初始化为空
+        list_init(&(proc->run_link));                      // 初始化运行链表节点
+        proc->time_slice = 0;                              // 时间片初始为0
+        proc->lab6_run_pool.left = proc->lab6_run_pool.right = proc->lab6_run_pool.parent = NULL;
+        proc->lab6_stride = 0;                             // stride初始为0
+        proc->lab6_priority = 0;                           // 优先级初始为0
     }
     return proc;
 }
@@ -236,6 +260,17 @@ void proc_run(struct proc_struct *proc)
          *   lsatp():                   Modify the value of satp register
          *   switch_to():              Context switching between two processes
          */
+        bool intr_flag;
+        local_intr_save(intr_flag);
+        {
+            struct proc_struct *prev = current;
+            current = proc;                       // 更新当前进程
+            // 切换页表（SATP）
+            lsatp(current->pgdir);
+            barrier();                            // 防止乱序
+            switch_to(&(prev->context), &(proc->context));
+        }
+        local_intr_restore(intr_flag);
     }
 }
 
@@ -452,6 +487,45 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
      *    update step 1: set child proc's parent to current process, make sure current process's wait_state is 0
      *    update step 5: insert proc_struct into hash_list && proc_list, set the relation links of process
      */
+
+    // 1. 分配进程控制块
+    if ((proc = alloc_proc()) == NULL) {
+        goto fork_out;
+    }
+
+    // 2. 分配内核栈
+    if (setup_kstack(proc) != 0) {
+        goto bad_fork_cleanup_proc;
+    }
+
+    // 3. 复制/共享内存
+    if (copy_mm(clone_flags, proc) != 0) {
+        goto bad_fork_cleanup_kstack;
+    }
+
+    // LAB5 step 1: 设置父进程并确保当前进程的 wait_state 为 0
+    proc->parent = current;
+    assert(current->wait_state == 0);
+
+    proc->pid = get_pid();
+
+    // 4. 设置 trapframe 与初始上下文
+    copy_thread(proc, stack, tf);
+
+    // LAB5 step 5: 用 set_links 同时插入链表并维护进程树关系
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    {
+        hash_proc(proc);
+        set_links(proc);
+    }
+    local_intr_restore(intr_flag);
+
+    // 6. 设置为 RUNNABLE
+    wakeup_proc(proc);
+
+    // 7. 返回子进程 PID
+    ret = proc->pid;
 
 fork_out:
     return ret;
@@ -688,6 +762,17 @@ load_icode(unsigned char *binary, size_t size)
      *          tf_eip should be the entry point of this binary program (elf->e_entry)
      *          tf_eflags should be set to enable computer to produce Interrupt
      */
+    // 1. 用户栈指针：放在用户栈顶 USTACKTOP
+    tf->gpr.sp = USTACKTOP;
+
+    // 2. 入口 PC：ELF 文件头中的入口地址 e_entry
+    tf->epc = elf->e_entry;
+
+    // 3. sstatus 设置为从 S 态 sret 返回到 U 态
+    //    - 清掉 SPP：表示 sret 返回到 U 模式
+    //    - 置位 SPIE：sret 后在 U 态开中断
+    tf->status = sstatus & ~SSTATUS_SPP;
+    tf->status |= SSTATUS_SPIE;
 
     ret = 0;
 out:

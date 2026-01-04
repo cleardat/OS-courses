@@ -18,6 +18,10 @@ static void
 RR_init(struct run_queue *rq)
 {
     // LAB6: YOUR CODE
+    // 初始化运行队列的链表为空
+    list_init(&(rq->run_list));
+    // 进程数量设为0
+    rq->proc_num = 0;
 }
 
 /*
@@ -35,6 +39,17 @@ static void
 RR_enqueue(struct run_queue *rq, struct proc_struct *proc)
 {
     // LAB6: YOUR CODE
+    assert(list_empty(&(proc->run_link)));
+    // 将进程加入运行队列尾部
+    list_add_before(&(rq->run_list), &(proc->run_link));
+    // 如果进程的时间片为0或超过最大值，则重新设置为最大时间片
+    if (proc->time_slice == 0 || proc->time_slice > rq->max_time_slice) {
+        proc->time_slice = rq->max_time_slice;
+    }
+    // 设置进程所属的运行队列
+    proc->rq = rq;
+    // 增加运行队列中的进程数量
+    rq->proc_num++;
 }
 
 /*
@@ -48,6 +63,11 @@ static void
 RR_dequeue(struct run_queue *rq, struct proc_struct *proc)
 {
     // LAB6: YOUR CODE
+    assert(!list_empty(&(proc->run_link)) && proc->rq == rq);
+    // 从运行队列中删除进程
+    list_del_init(&(proc->run_link));
+    // 减少运行队列中的进程数量
+    rq->proc_num--;
 }
 
 /*
@@ -62,6 +82,13 @@ static struct proc_struct *
 RR_pick_next(struct run_queue *rq)
 {
     // LAB6: YOUR CODE
+    // 如果队列为空，返回NULL
+    list_entry_t *le = list_next(&(rq->run_list));
+    if (le != &(rq->run_list)) {
+        // 返回队首进程
+        return le2proc(le, run_link);
+    }
+    return NULL;
 }
 
 /*
@@ -75,6 +102,14 @@ static void
 RR_proc_tick(struct run_queue *rq, struct proc_struct *proc)
 {
     // LAB6: YOUR CODE
+    if (proc->time_slice > 0) {
+        // 时间片减一
+        proc->time_slice--;
+    }
+    if (proc->time_slice == 0) {
+        // 时间片耗尽，设置需要重新调度标志
+        proc->need_resched = 1;
+    }
 }
 
 struct sched_class default_sched_class = {
